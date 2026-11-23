@@ -1,0 +1,17 @@
+CC = gcc
+CFLAGS = -Wall -Wextra -O2
+
+TARGETS = client_node broker_node
+
+all: $(TARGETS)
+
+client_node: client_node.c raw_ethernet.c raw_ethernet.h
+	$(CC) $(CFLAGS) client_node.c raw_ethernet.c -o client_node
+
+broker_node: broker_node.c raw_ethernet.c raw_ethernet.h
+	$(CC) $(CFLAGS) broker_node.c raw_ethernet.c -o broker_node
+
+clean:
+	rm -f $(TARGETS)
+
+.PHONY: all clean
