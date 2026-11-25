@@ -28,8 +28,8 @@ typedef struct {
     int sock;
 
     broker_inflight_t inflight[BROKER_MAX_INFLIGHT];
-    uint8_t last_received_msg_id[LQTT_MAX_CLIENTS]; // Last received QoS 1 msg_id from each client for duplicate suppression
-    bool has_last_received[LQTT_MAX_CLIENTS]; // Whether there is a last received message for this client
+    uint8_t last_received_msg_id[LQTT_MAX_TOPICS][LQTT_MAX_CLIENTS]; // Last received QoS 1 msg_id per (topic, client) for duplicate suppression
+    bool has_last_received[LQTT_MAX_TOPICS][LQTT_MAX_CLIENTS]; // Whether there is a last received message for this (topic, client)
 } broker_controller_t;
 
 // Initializes the broker controller, its internal lqtt_broker_node_t, and socket binding.
