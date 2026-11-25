@@ -12,7 +12,7 @@
 #define CLIENT_MAX_RETRIES 5 // Max retries per un-acked message before giving up
 
 // Callback invoked when a valid, non-duplicate PUBLISH arrives from the broker
-typedef void (*client_message_callback)(uint8_t topic_id, const uint8_t *payload,
+typedef void (*client_message_callback_t)(uint8_t topic_id, const uint8_t *payload,
                                     uint8_t payload_len);
 
 // Represents an in-flight packet awaiting an ACK (SUBSCRIBE, UNSUBSCRIBE, or QoS 1 PUBLISH)
