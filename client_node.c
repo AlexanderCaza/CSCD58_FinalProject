@@ -42,7 +42,6 @@ int main(int argc, char *argv[]) {
                 if (len > MAX_PACKET_LENGTH) len = MAX_PACKET_LENGTH;
                 raw_send(sock, node_id, (uint8_t *)(line + 5), len);
             }
-            printf("> ");
             fflush(stdout);
         }
     }

@@ -5,7 +5,8 @@ To build mininet topo:
 sudo python3 topo.py
 
 To launch the node terminals:
-inside mininet CLI: xterm b1 c1 c2 c3
+inside mininet CLI: 
+xterm b1 c1 c2 c3
 
 To boot the nodes:
 In b1 cli: ./broker_node b1-eth0
