@@ -25,15 +25,6 @@ static int64_t now_ms_monotonic(void) {
     return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
 }
 
-// Sets a file descriptor to non-blocking mode
-static bool set_nonblocking(int fd) {
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0) {
-        return false;
-    }
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
-}
-
 // Parses command-line arguments into individual variables
 static int process_input(int argument_count, char **arguments, const char **iface,
                          uint16_t *node_id, int *tick_ms) {
@@ -282,7 +273,8 @@ int main(int argc, char **argv) {
     }
 
     // Prevent raw_recv from blocking if poll wakes on filtered frames
-    if (!set_nonblocking(sock)) {
+    int flags = fcntl(sock, F_GETFL, 0);
+    if (flags < 0 || fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
         perror("fcntl(O_NONBLOCK)");
         close(sock);
         return 1;
