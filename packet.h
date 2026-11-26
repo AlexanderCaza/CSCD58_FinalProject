@@ -40,4 +40,4 @@ typedef struct __attribute__((packed)) {
 uint8_t compute_checksum(const lqtt_packet_t *packet);
 
 // Verify that a packet's checksum is valid
-bool verify_packet_checksum(const lqtt_packet_t *packet, , size_t raw_len);
+bool verify_packet_checksum(const lqtt_packet_t *packet, size_t raw_len);
