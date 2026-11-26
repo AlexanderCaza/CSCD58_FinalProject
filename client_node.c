@@ -339,7 +339,7 @@ int main(int argc, char **argv) {
             }
         }
 
-        // Advance controller ticks for all elapsed tick intervals
+        // Catch up ticks if poll returned late or multiple tick windows passed
         now_ms = now_ms_monotonic();
         while (now_ms >= next_tick_ms) {
             client_controller_tick(&client_controller);
