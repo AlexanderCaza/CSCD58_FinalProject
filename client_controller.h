@@ -35,13 +35,13 @@ typedef struct {
     client_inflight_t inflight[CLIENT_MAX_INFLIGHT];
     uint8_t last_received_msg_id[CLIENT_MAX_TOPICS]; // Last received QoS 1 msg_id per topic
     bool has_last_received[CLIENT_MAX_TOPICS]; // Whether a QoS 1 message has been received on this topic
-    client_message_cb_t on_message;
+    client_message_callback_t on_message;
 } client_controller_t;
 
 // Initializes the client controller, socket binding, node ID, and optional message callback.
 // Returns: true if successful, false on fail
 bool client_controller_init(client_controller_t *controller, int sock, uint16_t client_id,
-                            client_message_cb_t on_message);
+                            client_message_callback_t on_message);
 
 // Sends a SUBSCRIBE request for topic_id at the requested QoS level and tracks it until SUBACK.
 bool client_subscribe(client_controller_t *controller, uint8_t topic_id, bool qos1);

@@ -1,5 +1,9 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 // Values are defined by the protocol spec or trivial math
 #define LQTT_MAX_PACKET_LEN 128
 #define LQTT_HEADER_LEN 8
@@ -36,4 +40,4 @@ typedef struct __attribute__((packed)) {
 uint8_t compute_checksum(const lqtt_packet_t *packet);
 
 // Verify that a packet's checksum is valid
-bool verify_packet_checksum(const lqtt_packet_t *packet);
+bool verify_packet_checksum(const lqtt_packet_t *packet, , size_t raw_len);
