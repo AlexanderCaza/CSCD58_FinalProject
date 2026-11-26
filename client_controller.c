@@ -1,5 +1,5 @@
-// Review this!!!!
 #include "client_controller.h"
+#include "lqtt_client.h"
 #include "raw_ethernet.h"
 
 #include <arpa/inet.h>
@@ -15,11 +15,6 @@
 // Generates jitter to reduce collisions on retransmissions
 static uint16_t next_jitter_ticks(void) {
     return (uint16_t)(rand() % (CLIENT_MAX_JITTER_TICKS + 1));
-}
-
-// Gets the next message ID for this client
-static uint8_t next_message_id(client_controller_t *controller) {
-    return controller->next_msg_id++;
 }
 
 // Sends a packet and if needed enters it into the retransmission tracking system
@@ -75,16 +70,9 @@ static void handle_broker_publish(client_controller_t *controller, const lqtt_pa
     // Always ACK a QoS 1 publish from the broker, even if it is a duplicate whose first ACK was lost
     if (is_qos1) {
         lqtt_packet_t ack;
-        memset(&ack, 0, sizeof(ack));
-        ack.length = LQTT_HEADER_LEN;
-        ack.msg_type = LQTT_MSG_PUBLISH_ACK;
-        ack.flags = 0;
-        ack.topic_id = topic_id;
-        ack.node_id = htons(controller->client_id);
-        ack.msg_id = packet->msg_id;
-        ack.checksum = compute_checksum(&ack);
-
-        raw_send(controller->sock, controller->client_id, (const uint8_t *)&ack, ack.length);
+        if (create_puback_packet(&controller->node, topic_id, packet->msg_id, &ack)) {
+            raw_send(controller->sock, controller->client_id, (const uint8_t *)&ack, ack.length);
+        }
 
         // Drop duplicate retransmissions without re-delivering to the application
         if (is_dupe && controller->has_last_received[topic_id] &&
@@ -96,7 +84,7 @@ static void handle_broker_publish(client_controller_t *controller, const lqtt_pa
     }
 
     // Ignore publishes for topics we are no longer subscribed to
-    if (controller->subbed_topics[topic_id] == 0) {
+    if (controller->node.subbed_topics[topic_id] == 0) {
         return;
     }
 
@@ -112,9 +100,12 @@ bool client_controller_init(client_controller_t *controller, int sock, uint16_t 
     }
 
     memset(controller, 0, sizeof(*controller));
+    if (!lqtt_client_init(client_id, &controller->node)) {
+        return false;
+    }
+
     controller->client_id = client_id;
     controller->sock = sock;
-    controller->next_msg_id = 1;
     controller->on_message = on_message;
 
     // Seed PRNG for retransmission jitter
@@ -130,17 +121,11 @@ bool client_subscribe(client_controller_t *controller, uint8_t topic_id, bool qo
         return false;
     }
 
-    controller->subbed_topics[topic_id] = qos1 ? 2 : 1;
-
     lqtt_packet_t packet;
-    memset(&packet, 0, sizeof(packet));
-    packet.length = LQTT_HEADER_LEN;
-    packet.msg_type = LQTT_MSG_SUBSCRIBE;
-    packet.flags = qos1 ? LQTT_FLAG_QOS1 : 0;
-    packet.topic_id = topic_id;
-    packet.node_id = htons(controller->client_id);
-    packet.msg_id = next_message_id(controller);
-    packet.checksum = compute_checksum(&packet);
+    uint8_t qos = qos1 ? 1 : 0;
+    if (!create_subscribe_packet(&controller->node, topic_id, qos, &packet)) {
+        return false;
+    }
 
     return send_and_track(controller, true, LQTT_MSG_SUBSCRIBE_ACK, &packet);
 }
@@ -150,7 +135,6 @@ bool client_unsubscribe(client_controller_t *controller, uint8_t topic_id) {
         return false;
     }
 
-    controller->subbed_topics[topic_id] = 0;
     controller->has_last_received[topic_id] = false;
 
     // Cancel any active QoS 1 retries for this topic
@@ -162,14 +146,9 @@ bool client_unsubscribe(client_controller_t *controller, uint8_t topic_id) {
     }
 
     lqtt_packet_t packet;
-    memset(&packet, 0, sizeof(packet));
-    packet.length = LQTT_HEADER_LEN;
-    packet.msg_type = LQTT_MSG_UNSUBSCRIBE;
-    packet.flags = 0;
-    packet.topic_id = topic_id;
-    packet.node_id = htons(controller->client_id);
-    packet.msg_id = next_message_id(controller);
-    packet.checksum = compute_checksum(&packet);
+    if (!create_unsubscribe_packet(&controller->node, topic_id, &packet)) {
+        return false;
+    }
 
     return send_and_track(controller, true, LQTT_MSG_UNSUBSCRIBE_ACK, &packet);
 }
@@ -184,24 +163,10 @@ bool client_publish(client_controller_t *controller, uint8_t topic_id, bool qos1
     }
 
     lqtt_packet_t packet;
-    memset(&packet, 0, sizeof(packet));
-    packet.length = (uint8_t)(LQTT_HEADER_LEN + payload_len);
-    packet.msg_type = LQTT_MSG_PUBLISH;
-    packet.flags = 0;
-    if (qos1) {
-        packet.flags |= LQTT_FLAG_QOS1;
+    if (!create_publish_packet(&controller->node, topic_id, qos1, retain, false,
+                               payload, payload_len, &packet)) {
+        return false;
     }
-    if (retain) {
-        packet.flags |= LQTT_FLAG_RETAIN;
-    }
-    packet.topic_id = topic_id;
-    packet.node_id = htons(controller->client_id);
-    packet.msg_id = next_message_id(controller);
-
-    if (payload_len > 0) {
-        memcpy(packet.payload, payload, payload_len);
-    }
-    packet.checksum = compute_checksum(&packet);
 
     return send_and_track(controller, qos1, LQTT_MSG_PUBLISH_ACK, &packet);
 }
