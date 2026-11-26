@@ -15,7 +15,6 @@
 #include <unistd.h>
 
 #define TICK_MS 10
-#define NS_PER_MS 1000000L
 
 static client_controller_t client_controller;
 
@@ -23,7 +22,7 @@ static client_controller_t client_controller;
 static int64_t now_ms_monotonic(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000LL + (int64_t)(ts.tv_nsec / NS_PER_MS);
+    return (int64_t)ts.tv_sec * 1000LL + (int64_t)(ts.tv_nsec / 1000000);
 }
 
 // Sets a file descriptor to non-blocking mode
