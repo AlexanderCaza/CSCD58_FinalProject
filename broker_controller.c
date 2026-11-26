@@ -16,8 +16,8 @@ static uint16_t next_jitter_ticks(void) {
 
 // Send a packet, and if QoS is 1, enter it into our tracking system
 static bool send_and_track(broker_controller_t *controller, uint16_t client_id,
-                           uint8_t topic_id, bool qos1, const lqtt_packet_t *pkt) {
-    if (raw_send(controller->sock, BROKER_ID, (const uint8_t *)pkt, pkt->length) < 0) {
+                           uint8_t topic_id, bool qos1, const lqtt_packet_t *packet) {
+    if (raw_send(controller->sock, BROKER_ID, (const uint8_t *)packet, packet->length) < 0) {
         return false;
     }
 
@@ -32,10 +32,10 @@ static bool send_and_track(broker_controller_t *controller, uint16_t client_id,
             controller->inflight[i].active = true;
             controller->inflight[i].client_id = client_id;
             controller->inflight[i].topic_id = topic_id;
-            controller->inflight[i].msg_id = pkt->msg_id;
+            controller->inflight[i].msg_id = packet->msg_id;
             controller->inflight[i].retries = 0;
             controller->inflight[i].ticks_remaining = BROKER_BASE_RETRY_TICKS + next_jitter_ticks();
-            memcpy(&controller->inflight[i].packet, pkt, sizeof(*pkt));
+            memcpy(&controller->inflight[i].packet, packet, sizeof(*packet));
             return true;
         }
     }
@@ -68,8 +68,8 @@ static void store_retained(lqtt_broker_node_t *node, uint8_t topic_id,
     if (node->retained[topic_id][slot_index].payload_length != LQTT_SLOT_EMPTY) {
         for (uint16_t client_id = 1; client_id < LQTT_MAX_CLIENTS; client_id++) {
             if (node->subs[topic_id][client_id] != 0 &&
-                node->client_retain_idx[topic_id][client_id] == slot_index) {
-                node->client_retain_idx[topic_id][client_id] = next_head;
+                node->client_retain_index[topic_id][client_id] == slot_index) {
+                node->client_retain_index[topic_id][client_id] = next_head;
             }
         }
     }
@@ -101,29 +101,29 @@ static void send_next_retained_for_client(broker_controller_t *controller, uint1
                                           uint8_t topic_id) {
     lqtt_broker_node_t *node = &controller->node;
     uint8_t sub_level = node->subs[topic_id][client_id];
-    uint8_t slot_index = node->client_retain_idx[topic_id][client_id];
+    uint8_t slot_index = node->client_retain_index[topic_id][client_id];
 
     // Stop draining if the client unsubscribed or already caught up
     if (sub_level == 0 || slot_index == LQTT_RETAIN_CAUGHT_UP) {
-        node->client_retain_idx[topic_id][client_id] = LQTT_RETAIN_CAUGHT_UP;
+        node->client_retain_index[topic_id][client_id] = LQTT_RETAIN_CAUGHT_UP;
         return;
     }
 
     const lqtt_retained_msg_t *slot = &node->retained[topic_id][slot_index];
     if (slot->payload_length == LQTT_SLOT_EMPTY) {
-        node->client_retain_idx[topic_id][client_id] = LQTT_RETAIN_CAUGHT_UP;
+        node->client_retain_index[topic_id][client_id] = LQTT_RETAIN_CAUGHT_UP;
         return;
     }
 
     // Deliver using the client's subscribed QoS level (2 = QoS 1, 1 = QoS 0)
     bool qos1 = (sub_level == 2);
-    lqtt_packet_t out_pkt;
+    lqtt_packet_t out_packet;
     if (!create_broker_publish_packet(node, client_id, topic_id, qos1, false,
-                                      slot->payload, slot->payload_length, &out_pkt)) {
+                                      slot->payload, slot->payload_length, &out_packet)) {
         return;
     }
 
-    if (!send_and_track(controller, client_id, topic_id, qos1, &out_pkt)) {
+    if (!send_and_track(controller, client_id, topic_id, qos1, &out_packet)) {
         return;
     }
 
@@ -131,27 +131,27 @@ static void send_next_retained_for_client(broker_controller_t *controller, uint1
     uint8_t next_slot_index = (slot_index + 1) % LQTT_MAX_RETAINED_MESSAGES;
     if (next_slot_index == node->retain_head[topic_id] ||
         node->retained[topic_id][next_slot_index].payload_length == LQTT_SLOT_EMPTY) {
-        node->client_retain_idx[topic_id][client_id] = LQTT_RETAIN_CAUGHT_UP;
+        node->client_retain_index[topic_id][client_id] = LQTT_RETAIN_CAUGHT_UP;
     } else {
-        node->client_retain_idx[topic_id][client_id] = next_slot_index;
+        node->client_retain_index[topic_id][client_id] = next_slot_index;
     }
 }
 
 // Registers a client's subscription, sends SUBACK, and starts sending retained messages
 static void handle_subscribe(broker_controller_t *controller, uint16_t client_id,
-                             const lqtt_packet_t *pkt) {
+                             const lqtt_packet_t *packet) {
     lqtt_broker_node_t *node = &controller->node;
-    uint8_t topic_id = pkt->topic_id;
+    uint8_t topic_id = packet->topic_id;
     uint8_t qos_val = 1; // 1 = QoS 0
-    if (pkt->flags & LQTT_FLAG_QOS1) {
+    if (packet->flags & LQTT_FLAG_QOS1) {
         qos_val = 2; // 2 = QoS 1
     }
 
     node->subs[topic_id][client_id] = qos_val;
-    node->client_retain_idx[topic_id][client_id] = find_oldest_retain_index(node, topic_id);
+    node->client_retain_index[topic_id][client_id] = find_oldest_retain_index(node, topic_id);
 
     lqtt_packet_t ack;
-    if (create_suback_packet(node, client_id, topic_id, pkt->msg_id, &ack)) {
+    if (create_suback_packet(node, client_id, topic_id, packet->msg_id, &ack)) {
         raw_send(controller->sock, BROKER_ID, (const uint8_t *)&ack, ack.length);
     }
 
@@ -160,12 +160,12 @@ static void handle_subscribe(broker_controller_t *controller, uint16_t client_id
 
 // Removes a client's subscription, clears pending retries on that topic, and sends UNSUBACK
 static void handle_unsubscribe(broker_controller_t *controller, uint16_t client_id,
-                               const lqtt_packet_t *pkt) {
+                               const lqtt_packet_t *packet) {
     lqtt_broker_node_t *node = &controller->node;
-    uint8_t topic_id = pkt->topic_id;
+    uint8_t topic_id = packet->topic_id;
 
     node->subs[topic_id][client_id] = 0;
-    node->client_retain_idx[topic_id][client_id] = LQTT_RETAIN_CAUGHT_UP;
+    node->client_retain_index[topic_id][client_id] = LQTT_RETAIN_CAUGHT_UP;
 
     // Cancel any active QoS 1 retries for this client/topic
     for (size_t i = 0; i < BROKER_MAX_INFLIGHT; i++) {
@@ -177,40 +177,40 @@ static void handle_unsubscribe(broker_controller_t *controller, uint16_t client_
     }
 
     lqtt_packet_t ack;
-    if (create_unsuback_packet(node, client_id, topic_id, pkt->msg_id, &ack)) {
+    if (create_unsuback_packet(node, client_id, topic_id, packet->msg_id, &ack)) {
         raw_send(controller->sock, BROKER_ID, (const uint8_t *)&ack, ack.length);
     }
 }
 
 // Handles an incoming PUBLISH: ACKs QoS 1, prevents duplicate sends, stores retained data, and publishes to subscribers
 static void handle_publish(broker_controller_t *controller, uint16_t client_id,
-                           const lqtt_packet_t *pkt) {
+                           const lqtt_packet_t *packet) {
     lqtt_broker_node_t *node = &controller->node;
-    uint8_t topic_id = pkt->topic_id;
-    bool is_qos1 = (pkt->flags & LQTT_FLAG_QOS1) != 0;
-    bool is_retain = (pkt->flags & LQTT_FLAG_RETAIN) != 0;
-    bool is_dupe = (pkt->flags & LQTT_FLAG_DUPE) != 0;
-    uint8_t payload_len = pkt->length - LQTT_HEADER_LEN;
+    uint8_t topic_id = packet->topic_id;
+    bool is_qos1 = (packet->flags & LQTT_FLAG_QOS1) != 0;
+    bool is_retain = (packet->flags & LQTT_FLAG_RETAIN) != 0;
+    bool is_dupe = (packet->flags & LQTT_FLAG_DUPE) != 0;
+    uint8_t payload_len = packet->length - LQTT_HEADER_LEN;
 
     // Always ACK a QoS 1 publish, even if it is a duplicate whose first ACK was lost
     // Note: QoS is "at least once"
     if (is_qos1) {
         lqtt_packet_t ack;
-        if (create_broker_puback_packet(node, client_id, topic_id, pkt->msg_id, &ack)) {
+        if (create_broker_puback_packet(node, client_id, topic_id, packet->msg_id, &ack)) {
             raw_send(controller->sock, BROKER_ID, (const uint8_t *)&ack, ack.length);
         }
 
         // Drop duplicate retransmissions without re-storing or re-broadcasting
         if (is_dupe && controller->has_last_received[topic_id][client_id] &&
-            controller->last_received_msg_id[topic_id][client_id] == pkt->msg_id) {
+            controller->last_received_msg_id[topic_id][client_id] == packet->msg_id) {
             return;
         }
         controller->has_last_received[topic_id][client_id] = true;
-        controller->last_received_msg_id[topic_id][client_id] = pkt->msg_id;
+        controller->last_received_msg_id[topic_id][client_id] = packet->msg_id;
     }
 
     if (is_retain) {
-        store_retained(node, topic_id, pkt->payload, payload_len);
+        store_retained(node, topic_id, packet->payload, payload_len);
     }
 
     // Publish to all subscribed clients
@@ -223,7 +223,7 @@ static void handle_publish(broker_controller_t *controller, uint16_t client_id,
         bool sub_qos1 = (sub_level == 2);
         lqtt_packet_t fwd;
         if (create_broker_publish_packet(node, sub_id, topic_id, sub_qos1, false,
-                                         pkt->payload, payload_len, &fwd)) {
+                                         packet->payload, payload_len, &fwd)) {
             send_and_track(controller, sub_id, topic_id, sub_qos1, &fwd);
         }
     }
@@ -243,9 +243,9 @@ bool broker_controller_init(broker_controller_t *controller, int sock) {
     controller->sock = sock;
 
     // Seed PRNG for retransmission jitter
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    srand((unsigned int)(ts.tv_nsec ^ ts.tv_sec ^ getpid()));
+    struct timespec time;
+    clock_gettime(CLOCK_MONOTONIC, &time);
+    srand((unsigned int)(time.tv_nsec));
 
     return true;
 }
@@ -262,30 +262,30 @@ void broker_process_packet(broker_controller_t *controller, const uint8_t *buf, 
         return;
     }
 
-    lqtt_packet_t pkt;
-    memset(&pkt, 0, sizeof(pkt));
-    memcpy(&pkt, buf, wire_len);
+    lqtt_packet_t packet;
+    memset(&packet, 0, sizeof(packet));
+    memcpy(&packet, buf, wire_len);
 
     // Drop corrupted packets
-    if (compute_checksum(&pkt) != pkt.checksum) {
+    if (compute_checksum(&packet) != packet.checksum) {
         return;
     }
 
     // Sanity check client ID and ignore broker sent messages
-    uint16_t client_id = ntohs(pkt.node_id);
+    uint16_t client_id = ntohs(packet.node_id);
     if (client_id == BROKER_ID || client_id >= LQTT_MAX_CLIENTS) {
         return;
     }
 
     // Handle packet based on type
-    if (pkt.msg_type == LQTT_MSG_SUBSCRIBE) {
-        handle_subscribe(controller, client_id, &pkt);
-    } else if (pkt.msg_type == LQTT_MSG_UNSUBSCRIBE) {
-        handle_unsubscribe(controller, client_id, &pkt);
-    } else if (pkt.msg_type == LQTT_MSG_PUBLISH) {
-        handle_publish(controller, client_id, &pkt);
-    } else if (pkt.msg_type == LQTT_MSG_PUBLISH_ACK) {
-        clear_inflight(controller, client_id, pkt.topic_id, pkt.msg_id);
+    if (packet.msg_type == LQTT_MSG_SUBSCRIBE) {
+        handle_subscribe(controller, client_id, &packet);
+    } else if (packet.msg_type == LQTT_MSG_UNSUBSCRIBE) {
+        handle_unsubscribe(controller, client_id, &packet);
+    } else if (packet.msg_type == LQTT_MSG_PUBLISH) {
+        handle_publish(controller, client_id, &packet);
+    } else if (packet.msg_type == LQTT_MSG_PUBLISH_ACK) {
+        clear_inflight(controller, client_id, packet.topic_id, packet.msg_id);
     }
 }
 
@@ -329,7 +329,7 @@ void broker_controller_tick(broker_controller_t *controller) {
     // Avoid flooding the client and we send 1 retained message during sub already
     for (uint16_t topic = 0; topic < LQTT_MAX_TOPICS; topic++) {
         for (uint16_t client_id = 1; client_id < LQTT_MAX_CLIENTS; client_id++) {
-            if (controller->node.client_retain_idx[topic][client_id] != LQTT_RETAIN_CAUGHT_UP) {
+            if (controller->node.client_retain_index[topic][client_id] != LQTT_RETAIN_CAUGHT_UP) {
                 send_next_retained_for_client(controller, client_id, (uint8_t)topic);
             }
         }
