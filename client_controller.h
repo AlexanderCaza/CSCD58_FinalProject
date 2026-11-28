@@ -1,6 +1,7 @@
 #pragma once
 
 #include "packet.h"
+#include "lqtt_client.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -28,6 +29,7 @@ typedef struct {
 
 // The client controller
 typedef struct {
+    lqtt_client_node_t node;
     uint16_t client_id;
     int sock;
     uint8_t next_msg_id;

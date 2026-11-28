@@ -53,6 +53,14 @@ static void clear_inflight(client_controller_t *controller, uint8_t ack_type,
             slot->expected_ack == ack_type &&
             slot->topic_id == topic_id &&
             slot->msg_id == msg_id) {
+            if (ack_type == LQTT_MSG_SUBSCRIBE_ACK) {
+                uint8_t qos_val = (slot->packet.flags & LQTT_FLAG_QOS1) ? 2 : 1;
+                controller->subbed_topics[topic_id] = qos_val;
+                controller->node.subbed_topics[topic_id] = qos_val;
+            } else if (ack_type == LQTT_MSG_UNSUBSCRIBE_ACK) {
+                controller->subbed_topics[topic_id] = 0;
+                controller->node.subbed_topics[topic_id] = 0;
+            }
             slot->active = false;
             return;
         }
@@ -178,7 +186,7 @@ void client_process_packet(client_controller_t *controller, const uint8_t *buf, 
 
     // Account for 60-byte minimum Ethernet frame padding on the wire
     uint8_t wire_len = buf[0];
-    if (wire_len < LQTT_HEADER_LEN || wire_len > len || wire_len > sizeof(lqtt_packet_t)) {
+    if (wire_len < LQTT_HEADER_LEN || wire_len > len) {
         return;
     }
 
